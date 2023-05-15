@@ -1,10 +1,7 @@
 package com.zhufucdev.shaver
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder.literal
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.ServerStopped
@@ -30,7 +27,7 @@ import net.minecraft.util.math.BlockPos
 import net.minecraft.util.math.Vec3i
 import java.io.InputStream
 
-val coroutine = CoroutineScope(Dispatchers.Default)
+var coroutine = CoroutineScope(Dispatchers.Default)
 
 var isShaving = false
 val shaveResult = mutableMapOf<Vec3i, DyeColor>()
@@ -80,6 +77,17 @@ fun init() {
             Log.info(LogCategory.GENERAL, "${shaver.color.getName()}: ${result.string}")
         }
         ActionResult.PASS
+    }
+
+    ServerLifecycleEvents.SERVER_STOPPING.register {
+        isShaving = false
+        shaveResult.clear()
+        shavers.clear()
+        coroutine.cancel()
+    }
+
+    ServerLifecycleEvents.SERVER_STARTING.register {
+        coroutine = CoroutineScope(Dispatchers.Default)
     }
 }
 
