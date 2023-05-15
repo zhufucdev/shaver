@@ -6,7 +6,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.ServerStopped
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents
+import net.fabricmc.fabric.api.resource.ResourceManagerHelper
 import net.fabricmc.loader.impl.util.log.Log
 import net.fabricmc.loader.impl.util.log.LogCategory
 import net.minecraft.block.Blocks
@@ -15,6 +18,7 @@ import net.minecraft.entity.EntityType
 import net.minecraft.entity.FallingBlockEntity
 import net.minecraft.entity.SpawnReason
 import net.minecraft.entity.passive.SheepEntity
+import net.minecraft.resource.ResourceType
 import net.minecraft.server.command.ServerCommandSource
 import net.minecraft.server.network.ServerPlayerEntity
 import net.minecraft.sound.SoundEvents
@@ -24,6 +28,7 @@ import net.minecraft.util.ActionResult
 import net.minecraft.util.DyeColor
 import net.minecraft.util.math.BlockPos
 import net.minecraft.util.math.Vec3i
+import java.io.InputStream
 
 val coroutine = CoroutineScope(Dispatchers.Default)
 
@@ -61,11 +66,16 @@ fun init() {
             })
     }
 
+    ResourceManagerHelper.get(ResourceType.CLIENT_RESOURCES).registerReloadListener(ResourceHandler)
+
     SheepShearCallback.EVENT.register { _, sheep ->
         if (!shavers.contains(sheep)) return@register ActionResult.PASS
         shavers.forEach { shaver ->
             shaver.isSheared = true
-            val result = getResult(shaver.color, 241)
+
+            val result = getResult(shaver.color) {
+                ResourceHandler.mapping?.get(it + 241) ?: "${it + 241}"
+            }
             shaver.customName = result
             Log.info(LogCategory.GENERAL, "${shaver.color.getName()}: ${result.string}")
         }
@@ -178,11 +188,11 @@ private fun buildDisplay(baseline: BlockPos, shaver: SheepEntity) {
     }
 }
 
-private fun getResult(color: DyeColor, offset: Int): Text {
+private fun getResult(color: DyeColor, map: (Int) -> String = { "$it" }): Text {
     val least = ServerState.state.shaverScope.least
     val result = shaveResult.filterValues { it == color }.keys.joinToString {
         val ordered = it.subtract(least)
-        "${ordered.x + ordered.z * GRASS_COUNT / SHAVER_COUNT + offset}"
+        map(ordered.x + ordered.z * GRASS_COUNT / SHAVER_COUNT)
     }
 
     return Text.literal(result).styled {
