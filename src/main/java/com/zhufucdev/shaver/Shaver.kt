@@ -4,13 +4,14 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder.literal
 import kotlinx.coroutines.*
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.ServerStopped
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents
+import net.fabricmc.fabric.api.networking.v1.PacketByteBufs
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking
 import net.fabricmc.fabric.api.resource.ResourceManagerHelper
 import net.fabricmc.loader.impl.util.log.Log
 import net.fabricmc.loader.impl.util.log.LogCategory
+import net.minecraft.block.BlockState
 import net.minecraft.block.Blocks
-import net.minecraft.client.sound.Sound
 import net.minecraft.entity.EntityType
 import net.minecraft.entity.FallingBlockEntity
 import net.minecraft.entity.SpawnReason
@@ -18,14 +19,15 @@ import net.minecraft.entity.passive.SheepEntity
 import net.minecraft.resource.ResourceType
 import net.minecraft.server.command.ServerCommandSource
 import net.minecraft.server.network.ServerPlayerEntity
+import net.minecraft.server.world.ServerWorld
+import net.minecraft.sound.SoundCategory
 import net.minecraft.sound.SoundEvents
 import net.minecraft.text.Text
-import net.minecraft.text.TextColor
 import net.minecraft.util.ActionResult
 import net.minecraft.util.DyeColor
+import net.minecraft.util.Identifier
 import net.minecraft.util.math.BlockPos
 import net.minecraft.util.math.Vec3i
-import java.io.InputStream
 
 var coroutine = CoroutineScope(Dispatchers.Default)
 
@@ -37,6 +39,9 @@ const val GRASS_COUNT = 40
 const val SHAVER_COUNT = 8
 
 private var platformBuilt = false
+
+val DISPLAY_BUILT_ID = Identifier("shaver", "display_built")
+val RESULT_SHOWN_SHEEP_SHEARED_ID = Identifier("shaver", "result_shown")
 
 fun init() {
     CommandRegistrationCallback.EVENT.register { dispatcher, _, _ ->
@@ -65,7 +70,7 @@ fun init() {
 
     ResourceManagerHelper.get(ResourceType.CLIENT_RESOURCES).registerReloadListener(ResourceHandler)
 
-    SheepShearCallback.EVENT.register { _, sheep ->
+    SheepShearCallback.EVENT.register { player, sheep ->
         if (!shavers.contains(sheep)) return@register ActionResult.PASS
         shavers.forEach { shaver ->
             shaver.isSheared = true
@@ -75,6 +80,12 @@ fun init() {
             }
             shaver.customName = result
             Log.info(LogCategory.GENERAL, "${shaver.color.getName()}: ${result.string}")
+        }
+
+        val world = sheep.world
+        if (world is ServerWorld) {
+            val shearer = world.players.first { it.uuid == player.uuid }
+            ServerPlayNetworking.send(shearer, RESULT_SHOWN_SHEEP_SHEARED_ID, PacketByteBufs.create())
         }
         ActionResult.PASS
     }
@@ -89,6 +100,41 @@ fun init() {
     ServerLifecycleEvents.SERVER_STARTING.register {
         coroutine = CoroutineScope(Dispatchers.Default)
     }
+
+    var completed = 0
+    ShaverCompleteCallback.EVENT.register(object : ShaverCompleteCallback {
+        override fun complete(color: DyeColor, shaver: SheepEntity) {
+            val world = shaver.world
+
+            val range = ServerState.state.shaverScope
+            val x = (range.least.x + range.most.x) / 2
+            val y = range.least.y + 5
+            val z = range.least.z + completed
+
+            val concretes = shaveResult.filterValues { it == color }.keys.map { original ->
+                val blockPos = BlockPos(original)
+                val originalState = world.getBlockState(blockPos)
+                FallingBlockEntity.spawnFromBlock(world, blockPos, originalState)
+                world.setBlockState(blockPos, Blocks.BARRIER.defaultState)
+
+                originalState
+            }
+
+            var countdown = 20
+            ServerTickEvents.START_SERVER_TICK.register {
+                if (countdown >= 0)
+                    countdown--
+                if (countdown == 0) {
+                    concretes.forEach { concrete ->
+                        val baseline1 = BlockPos(x, y, z)
+                        buildDisplay(baseline1, concrete, shavers.first { it.color == color })
+                    }
+                }
+            }
+
+            completed++
+        }
+    })
 }
 
 suspend fun buildPlatform(player: ServerPlayerEntity) {
@@ -143,42 +189,28 @@ suspend fun buildPlatform(player: ServerPlayerEntity) {
         delay(200)
     }
 
-    var completed = 0
-    ShaverCompleteCallback.EVENT.register(object : ShaverCompleteCallback {
-        override fun complete(color: DyeColor, shaver: SheepEntity) {
-            val range = ServerState.state.shaverScope
-            val x = (range.least.x + range.most.x) / 2
-            val y = range.least.y + 5
-            val z = range.least.z + completed
 
-            val flags = shaveResult.filterValues { it == color }.keys.map { original ->
-                val blockPos = BlockPos(original)
-                val originalState = world.getBlockState(blockPos)
-                FallingBlockEntity.spawnFromBlock(world, blockPos, originalState)
-                world.setBlockState(blockPos, Blocks.BARRIER.defaultState)
-
-                originalState
-            }
-
-            var countdown = 20
-            ServerTickEvents.START_SERVER_TICK.register {
-                if (countdown >= 0)
-                    countdown--
-                if (countdown == 0) {
-                    flags.forEach { flag ->
-                        val baseline1 = BlockPos(x, y, z)
-                        world.setBlockState(baseline1, flag)
-                        buildDisplay(baseline1, shavers.first { it.color == color })
-                    }
-                }
-            }
-
-            completed++
-        }
-    })
 }
 
-private fun buildDisplay(baseline: BlockPos, shaver: SheepEntity) {
+private fun buildDisplay(baseline: BlockPos, concrete: BlockState, shaver: SheepEntity) {
+    val world = shaver.world as ServerWorld
+    world.setBlockState(baseline, concrete)
+    world.players.forEach {
+        val buf = PacketByteBufs.create()
+        buf.writeBlockPos(baseline)
+        ServerPlayNetworking.send(it, DISPLAY_BUILT_ID, buf)
+    }
+    world.playSound(
+        null,
+        baseline.x.toDouble(),
+        baseline.y.toDouble(),
+        baseline.z.toDouble(),
+        SoundEvents.ENTITY_ARROW_HIT_PLAYER,
+        SoundCategory.AMBIENT,
+        10F,
+        1F
+    )
+
     shaver.setNoGravity(true)
     shaver.isInvulnerable = true
     val origin = shaver.pos

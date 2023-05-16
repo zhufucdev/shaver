@@ -17,6 +17,12 @@
         "adapter": "kotlin",
         "value": "com.zhufucdev.shaver.ShaverKt::init"
       }
+    ],
+    "client": [
+      {
+        "adapter": "kotlin",
+        "value": "com.zhufucdev.shaver.client.ShaverClientKt::init"
+      }
     ]
   },
   "mixins": [

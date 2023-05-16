@@ -5,6 +5,9 @@ import net.minecraft.block.Blocks
 import net.minecraft.entity.EntityStatuses
 import net.minecraft.entity.ai.goal.EatGrassGoal
 import net.minecraft.entity.passive.SheepEntity
+import net.minecraft.server.world.ServerWorld
+import net.minecraft.sound.SoundCategory
+import net.minecraft.sound.SoundEvents
 import net.minecraft.util.DyeColor
 
 class EatGrassGoal(private val mob: SheepEntity) : EatGrassGoal(mob) {
@@ -39,6 +42,18 @@ class EatGrassGoal(private val mob: SheepEntity) : EatGrassGoal(mob) {
         if (canEatGrass()) {
             world.setBlockState(grassPos, correspondingConcrete().defaultState, Block.NOTIFY_LISTENERS)
             ServerState.state.shaverGrades[mob.uuid] = mob.shaverGrade() + 1
+            if (world is ServerWorld) {
+                world.playSound(
+                    null,
+                    grassPos.x.toDouble(),
+                    grassPos.y.toDouble(),
+                    grassPos.z.toDouble(),
+                    SoundEvents.BLOCK_GRASS_BREAK,
+                    SoundCategory.BLOCKS,
+                    10F,
+                    1F
+                )
+            }
 
             if (completed) {
                 ShaverCompleteCallback.EVENT.invoker().complete(mob.color, mob)
