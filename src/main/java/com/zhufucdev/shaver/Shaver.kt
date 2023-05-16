@@ -162,14 +162,15 @@ suspend fun buildPlatform(player: ServerPlayerEntity) {
 
             var countdown = 20
             ServerTickEvents.START_SERVER_TICK.register {
-                if (countdown > 0)
+                if (countdown >= 0)
                     countdown--
-                else
+                if (countdown == 0) {
                     flags.forEach { flag ->
                         val baseline1 = BlockPos(x, y, z)
                         world.setBlockState(baseline1, flag)
                         buildDisplay(baseline1, shavers.first { it.color == color })
                     }
+                }
             }
 
             completed++
@@ -192,6 +193,9 @@ private fun buildDisplay(baseline: BlockPos, shaver: SheepEntity) {
                 current.y,
                 current.z
             )
+        } else {
+            val fin = origin.add(delta)
+            shaver.updatePosition(fin.x, fin.y, fin.z)
         }
     }
 }
