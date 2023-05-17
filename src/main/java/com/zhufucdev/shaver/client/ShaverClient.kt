@@ -26,9 +26,9 @@ fun init() {
         }
         var timer = 0
         ClientTickEvents.START_CLIENT_TICK.register {
-            if (timer < 100) {
+            if (timer < 60) {
                 timer++
-            } else if (timer == 100) {
+            } else if (timer == 60) {
                 timer++
                 client.player?.playSound(
                     SoundEvents.UI_TOAST_CHALLENGE_COMPLETE,
